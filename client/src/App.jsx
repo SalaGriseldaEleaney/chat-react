@@ -36,7 +36,7 @@ function nombreChatPrivado(a, b) {
 export default function App() {
   const [nombre, setNombre] = useState('')
   const [usuarioId, setUsuarioId] = useState(null)
-  const [servidor] = useState('ws://localhost:8080')
+  // WebSocket desactivado: ahora la app usa API REST + MySQL
   const [conectado, setConectado] = useState(false)
   const [usuariosOnline, setUsuariosOnline] = useState([])
   const [chatActivo, setChatActivo] = useState({ tipo: 'todos', id: 'todos', nombre: 'Todos' })
@@ -194,10 +194,8 @@ export default function App() {
       return
     }
 
-    let usuarioBD
-
     try {
-      usuarioBD = await loginUsuario(usuario)
+      const usuarioBD = await loginUsuario(usuario)
 
       setUsuarioId(usuarioBD.id)
       usuarioIdRef.current = usuarioBD.id
@@ -211,111 +209,27 @@ export default function App() {
         setGrupos(gruposUsuario || [])
         setMensajes(mensajesUsuario || [])
       }
+
+      setConectado(true)
+      setUsuariosOnline([])
+      mensajeSistema(`Conectado como ${usuarioBD.nombre}`)
     } catch (error) {
       console.error('Error al iniciar usuario:', error)
       mensajeSistema('No se pudo iniciar el usuario en MySQL.')
-      return
     }
 
-    const ws = new WebSocket(servidor)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setConectado(true)
-      mensajeSistema(`Conectado como ${usuarioBD.nombre}`)
-    }
-
-    ws.onmessage = (event) => {
-      const datos = aJSONSeguro(event.data)
-
-      if (!datos) return
-
-      const { mensaje, data } = datos
-
-      if (mensaje === 'IDENTIFICATE') {
-        enviar('IDENTIFICACION', usuarioBD.nombre)
-        enviar('CONECTADOS')
-      }
-
-      if (mensaje === 'CONECTADOS') {
-        const lista = Array.isArray(data) ? data.filter(Boolean) : []
-        setUsuariosOnline(lista)
-      }
-
-      if (mensaje === 'CHAT' && data) {
-        const chatId = data.chatId || nombreChatPrivado(data.emisor, usuarioBD.nombre)
-        const chatNombre = data.chatNombre || data.emisor
-        const activo = chatActivoRef.current.id === chatId
-
-        const nuevoMensaje = {
-          id: data.id || `msg-${Date.now()}-${Math.random()}`,
-          tipo: 'entrante',
-          chatId,
-          chatNombre,
-          chatTipo: data.chatTipo || 'usuario',
-          contenido: data.mensaje,
-          emisor: data.emisor,
-          receptores: data.receptores || [],
-          hora: horaActual(),
-          estado: activo ? 'leido' : 'recibido',
-        }
-
-        guardarMensajeLocal(nuevoMensaje)
-
-        if (activo) {
-          enviar('LEIDO', { 
-            id: nuevoMensaje.id, 
-            receptor: data.emisor, 
-            lector: usuarioBD.nombre, 
-            chatId 
-          })
-        } else {
-          enviar('RECIBIDO', { 
-            id: nuevoMensaje.id, 
-            receptor: data.emisor, 
-            lector: usuarioBD.nombre, 
-            chatId 
-          })
-
-          setNotificaciones((prev) => ({ 
-            ...prev, 
-            [chatId]: (prev[chatId] || 0) + 1 
-          }))
-        }
-      }
-
-      if (mensaje === 'RECIBIDO' && data) {
-        actualizarMensajeLocal(data.id, { estado: 'recibido' })
-      }
-
-      if (mensaje === 'LEIDO' && data) {
-        actualizarMensajeLocal(data.id, { estado: 'leido' })
-      }
-
-      if (mensaje === 'SISTEMA' && data) {
-        mensajeSistema(data.mensaje)
-      }
-    }
-
-    ws.onclose = () => {
-      setConectado(false)
-      setUsuariosOnline([])
-      mensajeSistema('Te desconectaste del servidor.')
-    }
-
-    ws.onerror = () => {
-      mensajeSistema('Error al conectar con el servidor.')
-    }
+    /*
+      WebSocket desactivado:
+      Antes intentaba conectarse a ws://localhost:8080, pero eso falla
+      cuando la aplicación está publicada en Vercel.
+      Ahora la aplicación trabaja con API REST y MySQL.
+    */
   }
 
   const desconectar = () => {
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
-
     setConectado(false)
     setUsuariosOnline([])
+    mensajeSistema('Te desconectaste.')
   }
 
   const seleccionarChat = async (chat) => {
@@ -404,12 +318,6 @@ export default function App() {
     if (!texto.trim()) return
 
     const destinatarios = obtenerDestinatarios()
-
-    if (!destinatarios.length && chatActivo.tipo !== 'grupo') {
-      mensajeSistema('No hay destinatarios en línea para enviar el mensaje.')
-      return
-    }
-
     const contenido = texto.trim()
     let idMensaje = `msg-${Date.now()}-${Math.random()}`
 
@@ -432,15 +340,6 @@ export default function App() {
       }
     }
 
-    enviar('CHAT', {
-      id: idMensaje,
-      receptor: destinatarios,
-      receptores: destinatarios,
-      mensaje: contenido,
-      chatId: chatActivo.id,
-      chatNombre: chatActivo.nombre,
-      chatTipo: chatActivo.tipo
-    })
 
     const mensajeNuevo = {
       id: idMensaje,
